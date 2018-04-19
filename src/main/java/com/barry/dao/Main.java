@@ -150,7 +150,7 @@ public class Main {
         locationResult(forecastNumber, locationFilename);
     }
     /**
-     *@描述
+     *@描述  得到测试数据的预测位置
      *@参数  [forecastNumber, locationFilename]
      *@返回值  void
      *@注意  forecastLocation为最终预测的所有位置，locationProbability为预测位置对应的概率
