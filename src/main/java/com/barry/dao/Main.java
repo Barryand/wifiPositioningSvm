@@ -1,30 +1,78 @@
 package com.barry.dao;
 
+import Entity.PointLocEntity;
 import service.svm_predict;
-import service.svm_scale;
+import service.svm_scale_for_predict;
+import service.svm_scale_for_train;
 import service.svm_train;
 
 import java.io.*;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
  * Created by Barry on 2018/4/17.
  */
+
+
 public class Main {
+    /**
+     *@描述  c和gamma是事先用grid.py计算的结果,若换了新的训练集，需要重新计算c、g
+     *
+     *@创建人  Barry
+     *@创建时间  2018/4/23
+     *@修改人和其它信息
+     */
     public static void main(String[] args) throws IOException {
         Main main = new Main();
         String recordFilename = "trainfile\\allRecord.txt";
-        String formatedFilename = "trainfile\\train1.txt";
-        main.recordFileFormating(recordFilename, formatedFilename);//对训练文件进行重新组织
-        main.svmTraining(formatedFilename);
-        String testFilename = "trainfile\\userUploadData.txt";
-        String formateTestdFilename = "trainfile\\test1.txt";
-        main.testFilenameFormating(testFilename, formateTestdFilename);//对测试文件进行重新组织
+        main.recordFileFormating(recordFilename, recordFilename);//对训练文件进行重新组织，这里是覆盖掉原始文件
+
+        String[] sarg = {"-l", "0", "-u", "1", "-s", "trainfile\\scalerule.txt", //存放SVM缩放规则的路径
+                "-z", recordFilename//存放缩放后数据的路径,这里是覆盖掉原始文件
+                , recordFilename};//需要缩放的数据
+        String[] targ = { "-c", "8", "-g", "8", //c和gamma是事先用grid.py计算的结果
+                recordFilename, //存放SVM训练模型用的数据的路径
+                "trainfile\\model_r.txt"}; //存放SVM通过训练数据训练出来的模型的路径
+        main.svmTraining(sarg, targ);
+
+//测试用,使用Main.main（...）时，将main的参数改为(Map<String, Double> userData, List<PointLocEntity> pointLocEntityList)
+        Map<String, Double> userData = new HashMap<String, Double>();
+        String[] AP = {"TP-LINK_3051", "TP-LINK_35EB", "TP-LINK_3625", "TP-LINK_5958",
+                "TP-LINK_E7D2", "Four-Faith-2", "Four-Faith-3"};
+        double[] RSSI = {-47, -38, -45, -40, -46, -41, -41};
+        for (int i = 0; i < 7; i++) {
+            userData.put(AP[i], RSSI[i]);
+        }
+
+//测试用
+        List<PointLocEntity> pointLocEntityList = new ArrayList<PointLocEntity>();
         String locationFilename = "trainfile\\location.txt";
-        main.svmPredicting(formateTestdFilename, locationFilename);
+        File file = new File(locationFilename);
+        BufferedReader bufferedReader = new BufferedReader(new FileReader(file));
+        String templine = null;
+        String[] temp = null;
+        while ((templine = bufferedReader.readLine()) != null) {
+            temp = templine.split("\\s+");
+            PointLocEntity tempPointLocEntity = new PointLocEntity();
+            tempPointLocEntity.setPoint_name(temp[0]);
+            tempPointLocEntity.setX(Integer.valueOf(temp[1]));
+            tempPointLocEntity.setY(Integer.valueOf(temp[2]));
+            pointLocEntityList.add(tempPointLocEntity);
+        }
+        bufferedReader.close();
+
+
+        String formatedUserData = null;
+        formatedUserData = main.userDataFormating(userData);//对用户上传的数据进行重新组织*/
+        String[] sarg2 = {"-r", "trainfile\\scalerule.txt"};//重载SVM缩放规则
+        String[] parg = {"trainfile\\model_r.txt" }; //调用的是训练以后的模型
+        main.svmPredicting(formatedUserData, pointLocEntityList, sarg2, parg);
+
     }
     /**
      *@描述   对训练文件进行重新组织
@@ -45,17 +93,21 @@ public class Main {
         int MinuteHand = 1, SecondHand = 1;  //MinuteHand指一共50个点，SecondHand指每个点测100次
         try {
             bufferedReader = new BufferedReader(new FileReader(file));
-            outputStream = new PrintWriter(new FileOutputStream(formatedFilename));
+
+            StringBuffer stringBuffer = new StringBuffer();//由于输入文件和输出文件文件名相同，所以得建立一个缓冲区，读完后再写入文件
             while ((tempLine = bufferedReader.readLine()) != null) {
                 if (SecondHand > 100) {
                     SecondHand = 1;
                     MinuteHand++;
                 }
                 outLine = reorganize(tempLine, MinuteHand);
-                outputStream.println(outLine);
-                outputStream.flush();
+                stringBuffer.append(outLine).append(System.getProperty("line.separator"));
                 SecondHand++;
             }
+            outputStream = new PrintWriter(new FileOutputStream(formatedFilename));
+            outputStream.print(stringBuffer);
+            outputStream.flush();
+
         } catch (FileNotFoundException e) {
             e.printStackTrace();
             System.out.println("文件读取异常");
@@ -81,163 +133,49 @@ public class Main {
         for (int i = 0; i < 7; i++) {
             if (tempLine.indexOf(AP[i]) != -1) { //当一行数据中有某个AP
                 matcher.find(tempLine.indexOf(AP[i]) + 14);
-                sb.append(" ").append(i).append(":").append(matcher.group());
+                sb.append(" ").append(i+1).append(":").append(matcher.group());
             } else {
-                sb.append(" ").append(i).append(":").append(0);
+                sb.append(" ").append(i+1).append(":").append(0);
             }
         }
         return sb.toString();
     }
 
-    private void testFilenameFormating(String testFilename, String formateTestdFilename) {
-        File file = new File(testFilename);
-        String tempLine, outLine;
-        PrintWriter outputStream = null;
-        BufferedReader bufferedReader = null;
-        try {
-            bufferedReader = new BufferedReader(new FileReader(file));
-            outputStream = new PrintWriter(new FileOutputStream(formateTestdFilename));
-            while ((tempLine = bufferedReader.readLine()) != null) {
-                outLine = reorganize(tempLine, 0);
-                outputStream.println(outLine);
-                outputStream.flush();
-            }
-        } catch (FileNotFoundException e) {
-            e.printStackTrace();
-        } catch (IOException e) {
-            e.printStackTrace();
-        } finally {
-            if (outputStream != null) {
-                outputStream.close();
-            }
-            try {
-                if (bufferedReader != null) {
-                    bufferedReader.close();
-                }
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
+    private String userDataFormating(Map<String, Double> userData) {
+        String[] AP = {"TP-LINK_3051", "TP-LINK_35EB", "TP-LINK_3625", "TP-LINK_5958",
+                "TP-LINK_E7D2", "Four-Faith-2", "Four-Faith-3"};
+        List<Double> value = new ArrayList<Double>();
+        for (String key : AP) {
+            value.add(-userData.get(key));
         }
+        String formatedUserData = 0 + " ";
+        for (int i = 1; i < 8; i++) {
+            formatedUserData = formatedUserData + i + ":" + value.get(i-1) + " ";
+        }
+        return formatedUserData;
     }
-    private void svmTraining(String formatedFilename)throws IOException {
-        String[] sarg = {"-l", "0", "-u", "1", "-s", "trainfile\\scalerule.range", //存放SVM缩放规则的路径
-                "-z", "trainfile\\train1scaled.txt"//存放缩放后数据的路径
-                , formatedFilename};//需要缩放的数据
-        String[] targ = { "-c", "8", "-g", "8", //c和gamma是事先用grid.py计算的结果
-                "-b", "1", "trainfile\\train1scaled.txt", //存放SVM训练模型用的数据的路径
-                "trainfile\\model_r.txt"}; //存放SVM通过训练数据训练出来的模型的路径
+    private void svmTraining(String[] sarg, String[] targ)throws IOException {
+
         System.out.println("........SVM训练开始..........");
-        svm_scale s = new svm_scale();//创建一个缩放对象
+        svm_scale_for_train s = new svm_scale_for_train();//创建一个缩放对象
         s.main(sarg);
         svm_train t = new svm_train();//创建一个训练对象
         t.main(targ);  //调用
 
     }
-    private void svmPredicting(String formateTestdFilename, String locationFilename)throws IOException {
-        String[] sarg2 = {"-r", "trainfile\\scalerule.range", //重载SVM缩放规则
-                "-z", "trainfile\\test1scaled.txt",//存放缩放后测试数据的路径
-                formateTestdFilename};//需要缩放的数据
-
-        String[] parg = {   "-b", "1", "trainfile\\test1scaled.txt",  //这个是存放测试数据
-                "trainfile\\model_r.txt", //调用的是训练以后的模型
-                "trainfile\\out_r.txt"}; //生成的结果的文件的路径
-
+    private void svmPredicting(String formatedUserData, List<PointLocEntity> pointLocEntityList,
+                               String[] sarg2, String[] parg)throws IOException {
         svm_predict p = new svm_predict();//创建一个预测或者分类的对象
-        svm_scale s = new svm_scale();//创建一个缩放对象
-        s.main(sarg2);
-        List<Double> forecastNumber = new ArrayList<Double>();
-        p.main(parg, forecastNumber); //forecastNumber中下标偶数为每一行测试数据的预测结果编号，奇数为其概率
-        locationResult(forecastNumber, locationFilename);
+        svm_scale_for_predict s = new svm_scale_for_predict();//创建一个缩放对象
+        StringBuffer scaledUserData = new StringBuffer();
+        s.main(sarg2, formatedUserData, scaledUserData);
+        List<Double> forecastNumbers = new ArrayList<Double>();
+        p.main(parg, scaledUserData, forecastNumbers); //forecastNumbers本应为每一行测试数据预测结果的采样点序号
+        double forecastNumber = forecastNumbers.get(0);//不过由于版本变化，只有一行用户数据需要测试，因此也只有一个输出位置
+        //locationResult(forecastNumber, pointLocEntityList);
+        PointLocEntity locationResult = pointLocEntityList.get((int)forecastNumber - 1);//forecastNumber指的是第几个采样点，所以需要-1
+        System.out.println(locationResult.getPoint_name());
     }
-    /**
-     *@描述  得到测试数据的预测位置
-     *@参数  [forecastNumber, locationFilename]
-     *@返回值  void
-     *@注意  forecastLocation为最终预测的所有位置，locationProbability为预测位置对应的概率
-     *@创建人  Barry
-     *@创建时间  2018/4/19
-     *@修改人和其它信息
-     */
-    private void locationResult(List<Double> forecastNumber, String locationFilename) {
 
-        File file = new File(locationFilename);
-        String tempLine;
-        String[] coordinate;
-        List<String[]> locations = new ArrayList<String[]>();
-        try {
-            BufferedReader bufferedReader = new BufferedReader(new FileReader(file));
-            while ((tempLine = bufferedReader.readLine()) != null) {
-                coordinate = tempLine.split("\\s+");
-                locations.add(coordinate);
-            }
-        } catch (FileNotFoundException e) {
-            e.printStackTrace();
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-        List<String[]> forecastLocation = new ArrayList<String[]>();//测试数据的预测位置，每个String[]
-                                                        // 对应每一行测试数据的采样点名称+坐标
-        for (int i = 0; i < forecastNumber.size(); i=i+2) {
-            forecastLocation.add(locations.get(forecastNumber.get(i).intValue() - 1));
-        }
-        List<Double> locationProbability = new ArrayList<Double>();
-        for (int i = 1; i < forecastNumber.size(); i=i+2) {
-            locationProbability.add(forecastNumber.get(i));
-        }
-        for (String[] temp : forecastLocation) {
-            for (String tep : temp) {
-                System.out.print(tep + " ");
-            }
-            System.out.println();
-        }
-        //accuracyVerification(forecastLocation, locationFilename);
-    }
-    /**
-     *@描述
-     *@参数  [forecastLocation, locationFilename]
-     *@返回值  void
-     *@注意  此函数只有测试模型精度的时候可用,且main中recordFilename得与testFilename一致
-     *@创建人  Barry
-     *@创建时间  2018/4/19
-     *@修改人和其它信息
-     */
-    @Deprecated
-    private void accuracyVerification(List<String[]> forecastLocation, String locationFilename) {
-
-        File file = new File(locationFilename);
-        String tempLine;
-        String[] coordinate;
-        List<String[]> trainLocations = new ArrayList<String[]>();//训练数据每行的坐标位置
-        try {
-            BufferedReader bufferedReader = new BufferedReader(new FileReader(file));
-            while ((tempLine = bufferedReader.readLine()) != null) {
-                coordinate = tempLine.split("\\s+");
-                for (int i = 0; i < 100; i++) {
-                    trainLocations.add(coordinate);
-                }
-            }
-        } catch (FileNotFoundException e) {
-            e.printStackTrace();
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-        List<Double> distanceError = new ArrayList<Double>();//距离误差
-        int lineNumber = 0;
-        for (int MinuteHand = 0; MinuteHand < 50; MinuteHand++) {
-            for (int SecondHand = 0; SecondHand < 100; SecondHand++) {
-                lineNumber = 50 * MinuteHand + SecondHand;
-                double abscissa = Math.pow(Double.parseDouble(forecastLocation.get(lineNumber)[1])
-                        - Double.parseDouble(trainLocations.get(lineNumber)[1]),2);
-                double ordinate = Math.pow(Double.parseDouble(forecastLocation.get(lineNumber)[2])
-                        - Double.parseDouble(trainLocations.get(lineNumber)[2]),2);
-                distanceError.add(Math.sqrt(abscissa + ordinate));
-            }
-        }
-        double sum = 0;
-        for (double d : distanceError) {
-            sum += d;
-        }
-        System.out.println(sum/5000);
-    }
 }
 

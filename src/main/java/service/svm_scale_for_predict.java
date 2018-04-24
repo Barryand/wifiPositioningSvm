@@ -3,13 +3,8 @@ package service;
 
 import java.io.*;
 import java.util.*;
-/**
- * 此类升级至svm_scaleUpdate
- * 新增参数“-z [filename]” 表示将输出文件输出至本地方便训练及预测使用
- * @author Administrator
- *
- */
-public class svm_scale
+
+public class svm_scale_for_predict
 {
 	private String line = null;
 	private double lower = -1.0;
@@ -25,7 +20,6 @@ public class svm_scale
 	private long num_nonzeros = 0;
 	private long new_num_nonzeros = 0;
 
-	private FileWriter fWriter = null;
 
 
 
@@ -49,7 +43,7 @@ public class svm_scale
 		return new BufferedReader(new FileReader(filename));
 	}
 
-	private void output_target(double value)
+	private void output_target(double value, StringBuffer scaledUserData)
 	{
 		if(y_scaling)
 		{
@@ -61,17 +55,11 @@ public class svm_scale
 				value = y_lower + (y_upper-y_lower) *
 						(value-y_min) / (y_max-y_min);
 		}
-
-		System.out.print(value + " ");
-		try {
-			fWriter.write(value + " ");
-		} catch (IOException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		}
+		scaledUserData.append(value).append(" ");
+		//System.out.print(value + " ");
 	}
 
-	private void output(int index, double value)
+	private void output(int index, double value, StringBuffer scaledUserData)
 	{
         /* skip single-valued attribute */
 		if(feature_max[index] == feature_min[index])
@@ -88,31 +76,28 @@ public class svm_scale
 
 		if(value != 0)
 		{
-			System.out.print(index + ":" + value + " ");
-			try {
-				fWriter.write(index + ":" + value + " ");
-			} catch (IOException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-			}
+			scaledUserData.append(index).append(":").append(value).append(" ");
+			//System.out.print(index + ":" + value + " ");
 			new_num_nonzeros++;
 		}
 	}
 
-	private String readline(BufferedReader fp) throws IOException
+	private String readline(String formatedUserData) throws IOException
 	{
-		line = fp.readLine();
-		return line;
+		if (line != formatedUserData) {
+			line = formatedUserData;
+			return line;
+		} else {
+			return null;
+		}
 	}
 
-	private void run(String []argv) throws IOException
+	private void run(String []argv, String  formatedUserData, StringBuffer scaledUserData) throws IOException
 	{
 		int i,index;
-		BufferedReader fp = null, fp_restore = null;
+		BufferedReader fp_restore = null;
 		String save_filename = null;
 		String restore_filename = null;
-		String data_filename = null;
-		String save_file = null;
 
 
 		for(i=0;i<argv.length;i++)
@@ -131,7 +116,6 @@ public class svm_scale
 					break;
 				case 's': save_filename = argv[i];  break;
 				case 'r': restore_filename = argv[i];   break;
-				case 'z': save_file = argv[i];  break;
 				default:
 					System.err.println("unknown option");
 					exit_with_help();
@@ -149,19 +133,9 @@ public class svm_scale
 			System.exit(1);
 		}
 
-		if(argv.length != i+1)
+		if(argv.length != i)
 			exit_with_help();
 
-		data_filename = argv[i];
-		try {
-			fp = new BufferedReader(new FileReader(data_filename));
-		} catch (Exception e) {
-			System.err.println("can't open file " + data_filename);
-			System.exit(1);
-		}
-
-		File save_file_data = new File(save_file);
-		fWriter = new FileWriter(save_file_data);
 
         /* assumption: min index of attributes is 1 */
         /* pass 1: find out max index of attributes */
@@ -197,7 +171,7 @@ public class svm_scale
 			fp_restore = rewind(fp_restore, restore_filename);
 		}
 
-		while (readline(fp) != null)
+		while (readline(formatedUserData) != null)
 		{
 			StringTokenizer st = new StringTokenizer(line," \t\n\r\f:");
 			st.nextToken();
@@ -224,10 +198,10 @@ public class svm_scale
 			feature_min[i] = Double.MAX_VALUE;
 		}
 
-		fp = rewind(fp, data_filename);
+		line = null;
 
         /* pass 2: find out min/max value */
-		while(readline(fp) != null)
+		while(readline(formatedUserData) != null)
 		{
 			int next_index = 1;
 			double target;
@@ -261,7 +235,7 @@ public class svm_scale
 			}
 		}
 
-		fp = rewind(fp, data_filename);
+		line = null;
 
         /* pass 2.5: save/restore feature_min/feature_max */
 		if(restore_filename != null)
@@ -337,7 +311,7 @@ public class svm_scale
 		}
 
         /* pass 3: scale */
-		while(readline(fp) != null)
+		while(readline(formatedUserData) != null)
 		{
 			int next_index = 1;
 			double target;
@@ -345,38 +319,33 @@ public class svm_scale
 
 			StringTokenizer st = new StringTokenizer(line," \t\n\r\f:");
 			target = Double.parseDouble(st.nextToken());
-			output_target(target);
+			output_target(target, scaledUserData);
 			while(st.hasMoreElements())
 			{
 				index = Integer.parseInt(st.nextToken());
 				value = Double.parseDouble(st.nextToken());
 				for (i = next_index; i<index; i++)
-					output(i, 0);
-				output(index, value);
+					output(i, 0, scaledUserData);
+				output(index, value, scaledUserData);
 
 				next_index = index + 1;
 			}
 
 			for(i=next_index;i<= max_index;i++)
-				output(i, 0);
+				output(i, 0, scaledUserData);
 
 			System.out.print("\n");
-			fWriter.write("\r\n");
 		}
 		if (new_num_nonzeros > num_nonzeros)
 			System.err.print(
 					"WARNING: original #nonzeros " + num_nonzeros+"\n"
 							+"         new      #nonzeros " + new_num_nonzeros+"\n"
 							+"Use -l 0 if many original feature values are zeros\n");
-
-		fp.close();
-		fWriter.flush();
-		fWriter.close();
 	}
 
-	public static void main(String argv[]) throws IOException
+	public static void main(String argv[], String formatedUserData, StringBuffer scaledUserData) throws IOException
 	{
-		svm_scale s = new svm_scale();
-		s.run(argv);
+		svm_scale_for_predict s = new svm_scale_for_predict();
+		s.run(argv, formatedUserData, scaledUserData);
 	}
 }
